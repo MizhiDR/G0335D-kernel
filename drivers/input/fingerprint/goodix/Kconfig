@@ -1,0 +1,10 @@
+# GREE_GOODIX_FP (dbg55): GREE G0335D Goodix GF sensor.
+config FINGERPRINT_GOODIX
+	tristate "Goodix GF fingerprint driver (GREE G0335D)"
+	depends on INPUT_FINGERPRINT && SPI_MASTER
+	default y
+	help
+	  Creates /dev/goodix_fp for the Goodix GF fingerprint sensor on
+	  spi@7579000. Needed by gxfingerprint.default.so + QSEE TA.
+	  Ported from MoKee/android_kernel_zuk_msm8996 @ mkm.
+	  Say Y here to enable goodix fingerprint driver support!

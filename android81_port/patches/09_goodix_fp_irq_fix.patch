@@ -1,0 +1,251 @@
+# dbg59 - Goodix GF: make the finger-touch IRQ actually fire
+#   * request EDGE_BOTH instead of hardcoded RISING
+#   * apply DT eint_as_int pinctrl state (failure is non-fatal)
+#   * 5ms GPIO poll fallback, retired on the first real hw IRQ
+# apply with: patch -p1 < 09_goodix_fp_irq_fix.patch
+# baseline: 3.18.71 tree with patches 01..08 already applied
+--- a/drivers/input/fingerprint/goodix/gf_spi.c
++++ b/drivers/input/fingerprint/goodix/gf_spi.c
+@@ -40,6 +40,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/of_gpio.h>
+ #include <linux/timer.h>
++#include <linux/jiffies.h>
+ #include <linux/notifier.h>
+ #include <linux/fb.h>
+ #include <linux/pm_qos.h>
+@@ -109,6 +110,46 @@
+ static DEFINE_MUTEX(device_list_lock);
+ static struct gf_dev gf;
+ 
++/* GREE_GOODIX_FP (dbg59): the stock driver requested IRQF_TRIGGER_RISING
++ * while the GREE DT marks goodix,gpio_irq active-low, and the eint_as_int
++ * pinctrl state was never selected. On this board /proc/interrupts reported
++ * 0 hits for irq 479 (msmgpio 121 gf), so the HAL sat forever in
++ * "Waiting Finger Down". We now request BOTH edges, and as a fallback poll
++ * the IRQ GPIO while the HAL has the IRQ enabled. The poll disables itself
++ * as soon as a real hardware interrupt arrives, so it costs nothing when
++ * the TLMM interrupt works. */
++static void gf_poll_timer_fn(unsigned long data)
++{
++	struct gf_dev *gf_dev = (struct gf_dev *)data;
++	int lvl;
++
++	if (!gf_dev->poll_active || gf_dev->hw_irq_seen)
++		return;
++	if (!gpio_is_valid(gf_dev->irq_gpio))
++		return;
++
++	lvl = gpio_get_value(gf_dev->irq_gpio);
++	if (gf_dev->poll_last_level < 0) {
++		gf_dev->poll_last_level = lvl;
++	} else if (lvl != gf_dev->poll_last_level) {
++		gf_dev->poll_last_level = lvl;
++		if (time_after_eq(jiffies, gf_dev->poll_next_jiffies)) {
++			gf_dev->poll_irqs++;
++			gf_dev->poll_next_jiffies =
++				jiffies + msecs_to_jiffies(20);
++			if (gf_dev->poll_irqs <= 8)
++				pr_warn("gf: GREE_GOODIX_FP dbg59: poll edge "
++					"level=%d count=%u\n",
++					lvl, gf_dev->poll_irqs);
++#ifdef GF_FASYNC
++			if (gf_dev->async)
++				kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
++#endif
++		}
++	}
++	mod_timer(&gf_dev->poll_timer, jiffies + msecs_to_jiffies(5));
++}
++
+ static void gf_enable_irq(struct gf_dev *gf_dev)
+ {
+ 	if (gf_dev->irq_enabled) {
+@@ -116,6 +157,12 @@
+ 	} else {
+ 		enable_irq(gf_dev->irq);
+ 		gf_dev->irq_enabled = 1;
++		gf_dev->poll_last_level = -1;
++		gf_dev->poll_irqs = 0;
++		gf_dev->poll_next_jiffies = 0;
++		gf_dev->poll_active = 1;
++		mod_timer(&gf_dev->poll_timer,
++			  jiffies + msecs_to_jiffies(5));
+ 	}
+ }
+ 
+@@ -123,6 +170,8 @@
+ {
+ 	if (gf_dev->irq_enabled) {
+ 		gf_dev->irq_enabled = 0;
++		gf_dev->poll_active = 0;
++		del_timer(&gf_dev->poll_timer);
+ 		disable_irq(gf_dev->irq);
+ 	} else {
+ 		pr_warn("IRQ has been disabled.\n");
+@@ -420,6 +469,15 @@
+ static irqreturn_t gf_irq(int irq, void *handle)
+ {
+ 	struct gf_dev *gf_dev = &gf;
++	int lvl = -1;
++
++	if (gpio_is_valid(gf_dev->irq_gpio))
++		lvl = gpio_get_value(gf_dev->irq_gpio);
++	gf_dev->hw_irq_seen = 1;	/* retire the poll fallback */
++	gf_dev->irq_count++;
++	if (gf_dev->irq_count <= 8)
++		pr_warn("gf: GREE_GOODIX_FP dbg59: hw irq=%d count=%u "
++			"level=%d\n", irq, gf_dev->irq_count, lvl);
+ #ifdef GF_FASYNC
+ 	if (gf_dev->async)
+ 		kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
+@@ -671,20 +729,34 @@
+ 		gf_reg_key_kernel(gf_dev);
+ 		
+         gf_dev->irq = gf_irq_num(gf_dev);
++	/* GREE_GOODIX_FP (dbg59): DT goodix,gpio_irq = <0x36 0x79 0x01>
++	 * (flags=1 / active-low), but the stock driver hardcoded RISING and
++	 * never selected the eint_as_int pinctrl state. This tree's
++	 * msm_gpio_irq_set_type() supports IRQ_TYPE_EDGE_BOTH, so request
++	 * both edges: either polarity now wakes the HAL. */
++	setup_timer(&gf_dev->poll_timer, gf_poll_timer_fn,
++		    (unsigned long)gf_dev);
+ #if 1
+ 		ret = request_threaded_irq(gf_dev->irq, NULL, gf_irq,
+-					   IRQF_TRIGGER_RISING | IRQF_ONESHOT,
++					   IRQF_TRIGGER_RISING |
++					   IRQF_TRIGGER_FALLING |
++					   IRQF_ONESHOT,
+ 					   "gf", gf_dev);
+ #else
+                 ret = request_irq(gf_dev->irq, gf_irq,
+-                            IRQ_TYPE_EDGE_RISING, /*IRQ_TYPE_LEVEL_HIGH,*/
++                            IRQ_TYPE_EDGE_BOTH,
+                             "gf", gf_dev);
+ #endif
+ 		if (!ret) {
+ 			enable_irq_wake(gf_dev->irq);
+ 			gf_disable_irq(gf_dev);
++			pr_warn("gf: GREE_GOODIX_FP dbg59: irq=%d type=BOTH "
++				"gpio=%d flags=0x%x pinctrl=%s\n",
++				gf_dev->irq, gf_dev->irq_gpio,
++				gf_dev->irq_gpio_flags,
++				gf_dev->pinctrl_ok ? "applied" : "fallback");
+ 		} else {
+-			pr_err("gf: GREE_GOODIX_FP dbg55: request_threaded_irq(%d)"
++			pr_err("gf: GREE_GOODIX_FP dbg59: request_threaded_irq(%d)"
+ 			       " failed: %d\n", gf_dev->irq, ret);
+ 		}
+ 	}
+@@ -725,6 +797,10 @@
+ 	FUNC_ENTRY();
+ 
+ 	/* make sure ops on existing fds can abort cleanly */
++	if (gf_dev->poll_active) {
++		gf_dev->poll_active = 0;
++		del_timer_sync(&gf_dev->poll_timer);
++	}
+ 	if (gf_dev->irq)
+ 		free_irq(gf_dev->irq, gf_dev);
+ 
+--- a/drivers/input/fingerprint/goodix/gf_spi.h
++++ b/drivers/input/fingerprint/goodix/gf_spi.h
+@@ -3,6 +3,7 @@
+ 
+ #include <linux/types.h>
+ #include <linux/notifier.h>
++#include <linux/timer.h>
+ /**********************************************************/
+ enum FP_MODE{
+ 	GF_IMAGE_MODE = 0,
+@@ -79,6 +80,18 @@
+ 	struct notifier_block notifier;
+ 	char device_available;
+ 	char fb_black;
++
++	/* GREE_GOODIX_FP (dbg59): DT IRQ flags + hw-irq/poll bookkeeping,
++	 * see patch 09. */
++	unsigned int irq_gpio_flags;
++	unsigned int irq_count;
++	unsigned int poll_irqs;
++	int poll_last_level;
++	int poll_active;
++	int hw_irq_seen;
++	int pinctrl_ok;
++	unsigned long poll_next_jiffies;
++	struct timer_list poll_timer;
+ };
+ 
+ int gf_parse_dts(struct gf_dev* gf_dev);
+--- a/drivers/input/fingerprint/goodix/platform.c
++++ b/drivers/input/fingerprint/goodix/platform.c
+@@ -5,6 +5,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/timer.h>
+ #include <linux/err.h>
++#include <linux/pinctrl/consumer.h>
+ 
+ #include "gf_spi.h"
+ 
+@@ -50,8 +51,19 @@
+     gpio_direction_output(gf_dev->reset_gpio, 1);
+ 
+     /*get irq resourece*/
+-    gf_dev->irq_gpio = of_get_named_gpio(gf_dev->spi->dev.of_node,"goodix,gpio_irq",0);
+-    pr_info("gf:irq_gpio:%d\n", gf_dev->irq_gpio);
++    /* GREE_GOODIX_FP (dbg59): read the GPIO specifier flags too. The GREE
++     * DT says <0x36 0x79 0x01>; of_get_named_gpio() silently drops the
++     * third cell, which is why the stock driver could hardcode a rising
++     * edge that never happens on an active-low line. */
++    {
++        enum of_gpio_flags flags = 0;
++        gf_dev->irq_gpio = of_get_named_gpio_flags(
++                gf_dev->spi->dev.of_node, "goodix,gpio_irq", 0, &flags);
++        gf_dev->irq_gpio_flags = (unsigned int)flags;
++    }
++    pr_info("gf: GREE_GOODIX_FP dbg59: irq_gpio=%d flags=0x%x reset=%d pwr=%d\n",
++            gf_dev->irq_gpio, gf_dev->irq_gpio_flags,
++            gf_dev->reset_gpio, gf_dev->pwr_gpio);
+     if(!gpio_is_valid(gf_dev->irq_gpio)) {
+         pr_info("IRQ GPIO is invalid.\n");
+         return -1;
+@@ -63,6 +75,39 @@
+         return -1;
+     }
+     gpio_direction_input(gf_dev->irq_gpio);
++
++    /* GREE_GOODIX_FP (dbg59): apply DT pinctrl-names="eint_as_int" /
++     * pinctrl-0=<0x168> (gpio121, function=gpio, drive 8mA, input-enable,
++     * bias-disable). The bootloader leaves this pin at "2mA pull down".
++     * Patch 08 proved this DTB/pinctrl-driver pair is generation
++     * mismatched: pinctrl_select_state("spi_default") fails with -22 and
++     * aborts. So NEVER fail probe here -- log and continue, like 08. */
++    {
++        struct pinctrl *p;
++        struct pinctrl_state *s;
++        int prc;
++
++        p = devm_pinctrl_get(&gf_dev->spi->dev);
++        if (IS_ERR_OR_NULL(p)) {
++            pr_warn("gf: GREE_GOODIX_FP dbg59: pinctrl_get unavailable (%ld), continuing\n",
++                    PTR_ERR(p));
++        } else {
++            s = pinctrl_lookup_state(p, "eint_as_int");
++            if (IS_ERR_OR_NULL(s)) {
++                pr_warn("gf: GREE_GOODIX_FP dbg59: eint_as_int state missing (%ld), continuing\n",
++                        PTR_ERR(s));
++            } else {
++                prc = pinctrl_select_state(p, s);
++                if (prc) {
++                    pr_warn("gf: GREE_GOODIX_FP dbg59: eint_as_int select failed %d, continuing\n",
++                            prc);
++                } else {
++                    gf_dev->pinctrl_ok = 1;
++                    pr_info("gf: GREE_GOODIX_FP dbg59: eint_as_int pinctrl applied\n");
++                }
++            }
++        }
++    }
+ 
+ #ifdef POWER_GPIO_FLAG
+     //power on

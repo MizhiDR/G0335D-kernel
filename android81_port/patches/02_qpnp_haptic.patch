@@ -1,0 +1,22 @@
+--- a/arch/arm64/configs/g0335d_defconfig
++++ b/arch/arm64/configs/g0335d_defconfig
+@@ -3670,7 +3670,7 @@
+ # CONFIG_PFT is not set
+ # CONFIG_I2C_MSM_PROF_DBG is not set
+ CONFIG_SEEMP_CORE=y
+-# CONFIG_QPNP_HAPTIC is not set
++CONFIG_QPNP_HAPTIC=y
+ CONFIG_GPIO_USB_DETECT=y
+ CONFIG_MSM_11AD=y
+ # CONFIG_BW_MONITOR is not set
+--- a/out/.config
++++ b/out/.config
+@@ -3699,7 +3699,7 @@
+ # CONFIG_PFT is not set
+ # CONFIG_I2C_MSM_PROF_DBG is not set
+ CONFIG_SEEMP_CORE=y
+-# CONFIG_QPNP_HAPTIC is not set
++CONFIG_QPNP_HAPTIC=y
+ CONFIG_GPIO_USB_DETECT=y
+ CONFIG_MSM_11AD=y
+ # CONFIG_BW_MONITOR is not set

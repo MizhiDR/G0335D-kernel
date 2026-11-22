@@ -1,0 +1,5 @@
+Android 8.1 / LineageOS 15.1 ONLY kernel tree.
+Baseline: GREE G0335D 3.18.71 (cm-14.1 generation sources).
+Fixes: Oreo binder backport, CONFIG_QPNP_HAPTIC, ext4 quota/FBE config.
+See android81_port/README.md.
+DO NOT merge these patches into the LOS14.1 / marlin trees.

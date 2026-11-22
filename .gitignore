@@ -1,0 +1,16 @@
+# Build artifacts only - keep source, patches and configs
+out/
+*.o
+*.o.*
+*.a
+*.ko
+*.so
+*.gz
+*.lz4
+vmlinux
+.tmp_*
+System.map
+Module.symvers
+modules.order
+include/generated/
+arch/*/include/generated/

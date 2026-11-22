@@ -1,0 +1,34 @@
+--- a/sound/soc/msm/qdsp6v2/q6adm.c
++++ b/sound/soc/msm/qdsp6v2/q6adm.c
+@@ -2149,6 +2149,28 @@
+ 			flags = ADM_LEGACY_DEVICE_SESSION;
+ 	}
+ 
++	/* GREE G0335D capture topology fix (dbg61):
++	 * GREE 7.1-era ACDB yields topology 0x1000fff1 (0x1000ffXX special range,
++	 * cf. ADM_COPP_SPEAKER_MONO_PROTECT_TOPO 0x1000ffe8) for capture paths.
++	 * The Android 8.1 DSP does not implement it and rejects
++	 * ADM_CMD_DEVICE_OPEN_V5 with ADSP_EUNSUPPORTED (0x3) -> copp_idx -38
++	 * -> msm_pcm_capture_prepare ret:-22 -> no recording.
++	 * Valid capture COPP topologies all live below 0x10000000
++	 * (NULL_COPP 0x10312 / DEFAULT 0x10314 / VPM_TX_* 0x10F7x-0x10F8x).
++	 * Force any out-of-range capture topology back to NULL_COPP_TOPOLOGY,
++	 * the raw-PCM topology the DSP always accepts (also the fallback used by
++	 * msm_routing_get_adm_topology() when ACDB calibration is missing).
++	 * Playback paths are untouched. */
++	if ((path == ADM_PATH_LIVE_REC || path == ADM_PATH_NONLIVE_REC) &&
++	    topology > 0x10000000) {
++		{
++			static unsigned int gree_fix_log;
++			if (gree_fix_log < 16) {
++				pr_err("%s: GREE_CAPTURE_TOPO_FIX dbg61 path=%d bad_topo=0x%x -> NULL_COPP(0x%x)\n",
++				       __func__, path, topology, NULL_COPP_TOPOLOGY);
++				gree_fix_log++;
++			}
++		}
++		topology = NULL_COPP_TOPOLOGY;
++	}
++
+ 	if ((topology == VPM_TX_SM_ECNS_COPP_TOPOLOGY) ||
+ 	    (topology == VPM_TX_DM_FLUENCE_COPP_TOPOLOGY) ||
+ 	    (topology == VPM_TX_DM_RFECNS_COPP_TOPOLOGY))

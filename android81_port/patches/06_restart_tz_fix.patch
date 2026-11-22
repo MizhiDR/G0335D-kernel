@@ -1,0 +1,71 @@
+# dbg54 - suppress TZ SCM_SVC_BOOT writes so normal reboot works
+# apply with: patch -p1 < 06_restart_tz_fix.patch
+# baseline: 3.18.71 tree with patches 01..05 already applied
+--- a/drivers/power/reset/msm-poweroff.c
++++ b/drivers/power/reset/msm-poweroff.c
+@@ -131,8 +131,20 @@
+ 
+ static void set_dload_mode(int on)
+ {
+-	int ret;
+-
++	/* GREE_RESTART_TZ_FIX (dbg54)
++	 * GREE G0335D: any SCM_SVC_BOOT write from the kernel poisons the TZ
++	 * secure-watchdog state. After a normal reboot TZ then deasserts
++	 * PS_HOLD ~9s into the next boot, which is why rebooting used to need
++	 * a 10s power-key hard power-off or TWRP->System.
++	 * marlin evidence on this same board: dbg35 first ran the probe-side
++	 * set_dload_mode()+scm_disable_sdi() -> 9s PS_HOLD reset; dbg40 used
++	 * set_dload_mode(0) (still issued SCM_DLOAD_CMD) -> one round only;
++	 * dbg41 skipped the TZ SCM calls -> stable.
++	 * Boot firmware already programs TZ dload/SDI correctly, so keep the
++	 * IMEM download-mode magic (read by the bootloader) and the
++	 * dload_mode_enabled flag, but do NOT call into TZ. EDL keeps its own
++	 * SCM path in scm_set_dload_mode().
++	 */
+ 	if (dload_mode_addr) {
+ 		__raw_writel(on ? 0xE47B337D : 0, dload_mode_addr);
+ 		__raw_writel(on ? 0xCE14091A : 0,
+@@ -140,10 +152,8 @@
+ 		mb();
+ 	}
+ 
+-	ret = scm_set_dload_mode(on ? SCM_DLOAD_MODE : 0, 0);
+-	if (ret)
+-		pr_err("Failed to set secure DLOAD mode: %d\n", ret);
+-
++	pr_info("msm-poweroff: GREE_RESTART_TZ_FIX dbg54: set_dload_mode(%d)"
++		" IMEM only, TZ SCM suppressed\n", on);
+ 	dload_mode_enabled = on;
+ }
+ 
+@@ -216,22 +226,13 @@
+ 
+ static void scm_disable_sdi(void)
+ {
+-	int ret;
+-	struct scm_desc desc = {
+-		.args[0] = 1,
+-		.args[1] = 0,
+-		.arginfo = SCM_ARGS(2),
+-	};
+-
+-	/* Needed to bypass debug image on some chips */
+-	if (!is_scm_armv8())
+-		ret = scm_call_atomic2(SCM_SVC_BOOT,
+-			       SCM_WDOG_DEBUG_BOOT_PART, 1, 0);
+-	else
+-		ret = scm_call2_atomic(SCM_SIP_FNID(SCM_SVC_BOOT,
+-			  SCM_WDOG_DEBUG_BOOT_PART), &desc);
+-	if (ret)
+-		pr_err("Failed to disable secure wdog debug: %d\n", ret);
++	/* GREE_RESTART_TZ_FIX (dbg54)
++	 * SCM_WDOG_DEBUG_BOOT_PART is the other TZ state write. Suppressing it
++	 * on probe / do_msm_restart() / do_msm_poweroff() leaves TZ exactly as
++	 * boot firmware set it. The reset itself is still performed by
++	 * halt_spmi_pmic_arbiter() and deassert_ps_hold(), both untouched.
++	 */
++	pr_info("msm-poweroff: GREE_RESTART_TZ_FIX dbg54: TZ SDI SCM suppressed\n");
+ }
+ 
+ void msm_set_restart_mode(int mode)

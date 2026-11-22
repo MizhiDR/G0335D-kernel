@@ -1,0 +1,48 @@
+# dbg53 - optional QCA firmware lookups fail fast (no 60s helper timeout)
+# apply with: patch -p1 < 05_wlan_fw_fastfail.patch
+--- a/drivers/staging/qcacld-2.0/CORE/SERVICES/BMI/ol_fw.c
++++ b/drivers/staging/qcacld-2.0/CORE/SERVICES/BMI/ol_fw.c
+@@ -553,6 +553,7 @@
+ 				u_int32_t address, bool compressed)
+ {
+ 	int status = EOK;
++	int fw_rc;  /* GREE_WLAN_FASTFAIL */
+ 	const char *filename = NULL;
+ 	const struct firmware *fw_entry;
+ 	u_int32_t fw_entry_size;
+@@ -680,7 +681,20 @@
+ 		break;
+ 	}
+ 
+-	if (request_firmware(&fw_entry, filename, scn->sc_osdev->device) != 0)
++	/* GREE_WLAN_FASTFAIL: board-data variants (bdwlan30.bXX) are
++	 * optional and are absent on GREE. request_firmware() would block
++	 * 60s per missing file in the usermode helper. Use the direct path
++	 * for those only; the default bdwlan30.bin fallback below still goes
++	 * through ueventd, exactly as before.
++	 */
++	if ((file == ATH_BOARD_DATA_FILE) &&
++	    strcmp(filename, scn->fw_files.board_data))
++		fw_rc = request_firmware_direct(&fw_entry, filename,
++						scn->sc_osdev->device);
++	else
++		fw_rc = request_firmware(&fw_entry, filename,
++					scn->sc_osdev->device);
++	if (fw_rc != 0)
+ 	{
+ 		pr_err("%s: Failed to get %s\n", __func__, filename);
+ 
+--- a/drivers/net/wireless/cnss/cnss_pci.c
++++ b/drivers/net/wireless/cnss/cnss_pci.c
+@@ -2112,7 +2112,10 @@
+ 		goto end;
+ 	}
+ 
+-	if (request_firmware(&fw_entry, filename, dev) != 0) {
++	/* GREE_WLAN_FASTFAIL: evicted30.bin is optional; without the direct
++	 * path a missing file costs a 60s usermode-helper timeout. */
++	if (request_firmware_direct(&fw_entry, filename, dev) != 0) {
++		pr_info("GREE_WLAN_FASTFAIL: optional %s absent, skip\n", filename);
+ 		pr_debug("cnss: failed to get fw: %s\n", filename);
+ 		mutex_unlock(&penv->fw_setup_stat_lock);
+ 		goto end;

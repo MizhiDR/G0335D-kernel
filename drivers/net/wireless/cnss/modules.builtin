@@ -1,0 +1,3 @@
+kernel/drivers/net/wireless/cnss/cnss_pci.ko
+kernel/drivers/net/wireless/cnss/cnss_sdio.ko
+kernel/drivers/net/wireless/cnss/cnss_common.ko

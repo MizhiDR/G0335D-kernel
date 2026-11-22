@@ -1,0 +1,88 @@
+--- a/drivers/media/platform/msm/camera_v2/sensor/msm_sensor_driver.c
++++ b/drivers/media/platform/msm/camera_v2/sensor/msm_sensor_driver.c
+@@ -467,6 +467,25 @@
+ 	size_down = slave_info->power_setting_array.size_down;
+ 	if (!size_down || size_down > MAX_POWER_CONFIG)
+ 		size_down = slave_info->power_setting_array.size;
++
++	/* dbg52 GREE compat: mirror the fallback power-up sequence. The
++	 * regulator handles live in data[0], so copy them from the up array. */
++	if (size_down == 0 && power_info->power_setting &&
++		power_info->power_setting_size > 0) {
++		uint16_t n = power_info->power_setting_size;
++		pd = kzalloc(sizeof(*pd) * n, GFP_KERNEL);
++		if (!pd)
++			return -ENOMEM;
++		for (i = 0; i < n; i++) {
++			pd[i] = power_info->power_setting[n - 1 - i];
++			pd[i].config_val = 0;
++		}
++		power_info->power_down_setting = pd;
++		power_info->power_down_setting_size = n;
++		pr_info("GREE_COMPAT: fallback power-down sequence (%d)\n", n);
++		return 0;
++	}
++
+ 	/* Validate size_down */
+ 	if (size_down > MAX_POWER_CONFIG) {
+ 		pr_err("failed: invalid size_down %d", size_down);
+@@ -520,6 +539,24 @@
+ 	return rc;
+ }
+ 
++
++/* dbg52: GREE G0335D / LOS15.1 camera compatibility.
++ * GREE's 7.1-era sensor libs leave power_setting_array empty; the power
++ * resources are described by the DT (cam_vdig/cam_vio regulators, MCLK,
++ * reset/vana GPIOs).  Use a minimal sequence built from those resources
++ * instead of failing the probe with -EINVAL.  GPIO entries whose DT
++ * gpio_num_info->valid[] bit is clear are skipped by msm_camera_power_up().
++ */
++#define GREE_PWR_SEQ_COUNT 6
++static const struct msm_sensor_power_setting gree_default_power_up[] = {
++	{ SENSOR_VREG, 0, 0, 1, { NULL } },                 /* cam_vdig */
++	{ SENSOR_VREG, 1, 0, 1, { NULL } },                 /* cam_vio  */
++	{ SENSOR_GPIO, SENSOR_GPIO_VANA, GPIO_OUT_HIGH, 1, { NULL } },
++	{ SENSOR_CLK, SENSOR_CAM_MCLK, 0, 5, { NULL } },
++	{ SENSOR_GPIO, SENSOR_GPIO_RESET, GPIO_OUT_LOW, 5, { NULL } },
++	{ SENSOR_GPIO, SENSOR_GPIO_RESET, GPIO_OUT_HIGH, 10, { NULL } },
++};
++
+ static int32_t msm_sensor_get_power_up_settings(void *setting,
+ 	struct msm_camera_sensor_slave_info *slave_info,
+ 	struct msm_camera_power_ctrl_t *power_info)
+@@ -531,8 +568,33 @@
+ 
+ 	size = slave_info->power_setting_array.size;
+ 
++	/* dbg52 GREE compat: empty power sequence from 7.1-era sensor libs. */
++	if (size == 0) {
++		pr_info("GREE_COMPAT: name=%s eeprom=%s act=%s ois=%s cam_id=%d"
++			" addr=0x%x id_reg=0x%x id=0x%x size=%d size_down=%d"
++			" pos=%d angle=%d\n",
++			slave_info->sensor_name, slave_info->eeprom_name,
++			slave_info->actuator_name, slave_info->ois_name,
++			(int)slave_info->camera_id,
++			(unsigned)slave_info->slave_addr,
++			(unsigned)slave_info->sensor_id_info.sensor_id_reg_addr,
++			(unsigned)slave_info->sensor_id_info.sensor_id,
++			(int)slave_info->power_setting_array.size,
++			(int)slave_info->power_setting_array.size_down,
++			(int)slave_info->sensor_init_params.position,
++			(int)slave_info->sensor_init_params.sensor_mount_angle);
++		pr_info("GREE_COMPAT: using minimal DT-based power-up sequence\n");
++		pu = kzalloc(sizeof(*pu) * GREE_PWR_SEQ_COUNT, GFP_KERNEL);
++		if (!pu)
++			return -ENOMEM;
++		memcpy(pu, gree_default_power_up, sizeof(gree_default_power_up));
++		power_info->power_setting = pu;
++		power_info->power_setting_size = GREE_PWR_SEQ_COUNT;
++		return 0;
++	}
++
+ 	/* Validate size */
+-	if ((size == 0) || (size > MAX_POWER_CONFIG)) {
++	if (size > MAX_POWER_CONFIG) {
+ 		pr_err("failed: invalid power_setting size_up = %d\n", size);
+ 		return -EINVAL;
+ 	}

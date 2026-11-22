@@ -1,0 +1,29 @@
+# dbg57 - spi_qsd: do not drop DT SPI children on init-time pinctrl failure
+# apply with: patch -p1 < 08_spi_qsd_pinctrl_fix.patch
+# baseline: 3.18.71 tree with patches 01..07 already applied
+--- a/drivers/spi/spi_qsd.c
++++ b/drivers/spi/spi_qsd.c
+@@ -141,7 +141,22 @@
+ 		if (result) {
+ 			dev_err(dd->dev, "%s: Can not set %s pins\n",
+ 			__func__, SPI_PINCTRL_STATE_DEFAULT);
+-			goto error;
++			/* GREE_GOODIX_FP (dbg57): pinctrl_select_state() fails while the
++			 * controller is still probing. Aborting init_resources()
++			 * here leaves dd->suspended=1, msm_spi_setup() then
++			 * returns -EBUSY and of_register_spi_devices() silently
++			 * drops EVERY child (goodix_touchfinger@0 included).
++			 * Continue unconditionally: on this board the failure
++			 * happens in get_local_resources() AFTER init_resources()
++			 * has set is_init_complete=true, and its errno is not
++			 * -EBUSY, so any condition-based downgrade misses it.
++			 * The bootloader/DT already mux these pins; log the real
++			 * errno and let spi_setup()/device registration proceed. */
++			dev_warn(dd->dev, "%s: %s pinctrl failed during "
++				"init, continuing (err=%d, init_done=%d)\n",
++				__func__, SPI_PINCTRL_STATE_DEFAULT, result,
++				dd->is_init_complete);
++			result = 0;
+ 		}
+ 	}
+ 	return 0;

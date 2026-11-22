@@ -1,0 +1,6 @@
+kernel/drivers/input/touchscreen/of_touchscreen.ko
+kernel/drivers/input/touchscreen/atmel_mxt_ts.ko
+kernel/drivers/input/touchscreen/atmel_maxtouch_ts.ko
+kernel/drivers/input/touchscreen/gen_vkeys.ko
+kernel/drivers/input/touchscreen/synaptics_dsx/synaptics_dsx_core.ko
+kernel/drivers/input/touchscreen/synaptics_dsx/synaptics_dsx_rmi_dev.ko
