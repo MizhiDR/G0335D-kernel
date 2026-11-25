@@ -1,27 +1,30 @@
 # Known issues & fixes status (G0335D Android 8.1 kernel)
 
 ## Done
-- [x] `android81_port/build_kernel.sh` — removed hardcoded `/root` and WSL paths. Now portable, auto-detects tree root, generates defconfig if missing.
-- [x] Extracted from working `Android8.1-vendor+boot.zip` / `boot.img`:
-  - `extracted/g0335d_candidate.dtb` (one of the G0335D DTBs)
+- [x] `android81_port/build_kernel.sh` — portable, no hardcoded paths.
+- [x] Extracted from working boot.img:
+  - `extracted/g0335d_candidate.dtb`
   - `extracted/wlan.ko` (vermagic matches 3.18.71-perf-...-dirty)
   - `extracted/kernel_from_boot.img.gz`
-  - See `extracted/README.md`
+- [x] `android81_port/package_boot.sh` — copies Image.gz + DTB (+ wlan.ko) into out/package and builds Image.gz-dtb.
 
-## Verified OK
-- [x] `android81_port/patches/10_capture_topo_fix.patch` — content is valid (GREE capture topology fallback to NULL_COPP).
-- [x] `wlan.ko` vermagic = `3.18.71-perf-g4a0c249ca2c8-01402-g2933054d2488-dirty SMP preempt mod_unload modversions aarch64` — compatible with this tree.
+## Verified in tree (not missing)
+- Synaptics DSX / DSX v21 touch drivers exist (`drivers/input/touchscreen/synaptics_dsx*`)
+- Atmel maxtouch exists
+- TFA audio codecs exist (`sound/soc/codecs/tfa*`)
+- TUSB320 exists (`drivers/misc/type-c/ti_i2c_tusb320.c`)
+- QPNP haptic is referenced
+- qcacld-2.0 WLAN driver source is in `drivers/staging/qcacld-2.0`
 
-## Still open (need source or device testing)
-- [ ] **GREE drivers missing** — defconfig enables touch (NT36xxx / Synaptics DSX), vibrator, TFA audio, TUSB320 but driver source not present in tree.
-- [ ] **Device tree** — stock DTB extracted (`extracted/g0335d_candidate.dtb`); still need to integrate into build or confirm which of the 31 DTBs is the exact match.
-- [ ] **WiFi** — matching `wlan.ko` is now in `extracted/`; still need to package it into the boot/vendor image or build from source.
-- [ ] **Defconfig is full .config dump** — should be regenerated with `make savedefconfig` after a clean build.
+## Still open
+- [ ] **NT36xxx** — `CONFIG_TOUCHSCREEN_NT36xxx=y` but no driver source in tree. Either add the driver or set `# CONFIG_TOUCHSCREEN_NT36xxx is not set`.
+- [ ] Integrate the extracted DTB into the normal build (currently only via package_boot.sh).
+- [ ] Confirm which of the 31 DTBs from the stock boot.img is the exact G0335D match (candidate is dtb_05).
+- [ ] Defconfig is a full .config dump — regenerate with `make savedefconfig` after a clean build.
 - [ ] MANIFEST.md5 is stale.
-- [ ] `-Werror` may cause build failures on newer toolchains.
+- [ ] Package wlan.ko into vendor image or load it at runtime.
 
-## Next recommended steps
-1. Try a clean build with the fixed `build_kernel.sh`.
-2. Package `extracted/wlan.ko` into the vendor image or load it.
-3. Append / use `extracted/g0335d_candidate.dtb` when building boot.img.
-4. If touch/audio fail, add missing driver sources or disable the corresponding CONFIG_*.
+## Next
+1. Build with fixed `build_kernel.sh`.
+2. Run `bash android81_port/package_boot.sh` to get Image.gz-dtb.
+3. If NT36 touch is required, source the driver; otherwise disable the config.
