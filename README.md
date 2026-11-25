@@ -108,3 +108,41 @@ bash android81_port/package_boot.sh
 
 Fixes, packaging scripts and NT36xxx driver skeleton by Grok (xAI).  
 Base tree from the G0335D Android 8.1 porting effort.
+
+---
+
+## Vendor blobs (full fix package)
+
+Stock 64-bit libs from the G0335D unbrick ROM are in `vendor_blobs/`.
+
+```
+vendor_blobs/proprietary/vendor/lib64/
+  libmdmdetect.so
+  libcne.so
+  libcneapiclient.so
+  libcneqmiutils.so
+  libdiag.so
+  libdsutils.so
+  libidl.so
+  libmmcamera2_*.so   (mct, stats, sensor, iface, imglib, pproc, cpp)
+  libmmcamera_imglib.so
+```
+
+Copy into the LOS vendor tree:
+```bash
+cp -a vendor_blobs/proprietary/vendor/lib64 \
+      vendor/gree/g0335d/proprietary/vendor/
+```
+
+### What this fixes
+- `mm-qcamera-daemon`: missing `libmdmdetect.so`
+- Supplies the CNE libs and the core mmcamera2 stack
+
+### What can still fail
+- **Protobuf**: `libcne*.so` may still miss symbols on LOS 15.1.  
+  Keep `vendor_stubs/protobuf_stub` and `LD_SHIM_LIBS` from  
+  `vendor_stubs/g0335d_shims.rc` as fallback.
+- **Camera**: needs the correct G0335D sensor lib + chromatix (not fully covered).
+- **32-bit**: this package is 64-bit only.
+
+Shims (source) remain in `vendor_stubs/` if the stock blobs are not enough.
