@@ -1,0 +1,9 @@
+wlan.ko vermagic:
+3.18.71-perf-g4a0c249ca2c8-01402-g2933054d2488-dirty SMP preempt mod_unload modversions aarch64
+
+If a newly built kernel refuses to load it:
+  insmod wlan.ko
+or temporarily:
+  echo 1 > /sys/module/wlan/parameters/... 
+Better: copy this exact wlan.ko into the vendor image that matches the running kernel,
+or rebuild qcacld-2.0 from drivers/staging/qcacld-2.0 so vermagic matches.
