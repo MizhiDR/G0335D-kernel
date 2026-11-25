@@ -1,0 +1,10 @@
+# Place in device tree (e.g. rootdir/etc/init/g0335d_shims.rc)
+# or merge into init.qcom.rc
+
+on early-init
+    # Preload stubs so vendor binaries can resolve missing symbols
+    export LD_SHIM_LIBS /system/bin/mm-qcamera-daemon|libmdmdetect.so:/system/bin/cnd|libprotobuf_stub_cne.so:/system/bin/netmgrd|libprotobuf_stub_cne.so:/system/bin/imsdatadaemon|libprotobuf_stub_cne.so
+
+on init
+    # Ensure the stub libs are on the linker path
+    export LD_LIBRARY_PATH /vendor/lib64:/vendor/lib:/system/lib64:/system/lib
